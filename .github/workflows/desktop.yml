@@ -1,0 +1,89 @@
+name: Desktop installers
+
+on:
+  push:
+    paths:
+      - "autocorrect.py"
+      - "desktop_app.py"
+      - "settings_web.py"
+      - "settings.html"
+      - "autocorrect_core/**"
+      - "packaging/**"
+      - ".github/workflows/desktop.yml"
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # to attach installers to a release when a v* tag is pushed
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: autocorrect-windows-installer
+            file: dist/AutocorrectSetup.exe
+          - os: macos-latest
+            artifact: autocorrect-mac-dmg
+            file: dist/Autocorrect.dmg
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r packaging/requirements-desktop.txt
+
+      - name: Icons and baked-in defaults
+        env:
+          SERVER_URL: ${{ vars.AUTOCORRECT_SERVER_URL }}
+        run: |
+          python packaging/make_icons.py
+          if [ -n "$SERVER_URL" ]; then
+            printf '{"server_url": "%s"}\n' "$SERVER_URL" > packaging/defaults.json
+          fi
+
+      - name: Build app (PyInstaller)
+        run: pyinstaller packaging/autocorrect.spec --noconfirm
+
+      - name: Self-test the built app
+        timeout-minutes: 3
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then APP=dist/Autocorrect/Autocorrect.exe; else APP=dist/Autocorrect.app/Contents/MacOS/Autocorrect; fi
+          export AUTOCORRECT_CONFIG="$RUNNER_TEMP/selftest-config.json"
+          export AUTOCORRECT_SELFTEST_OUT="$RUNNER_TEMP/selftest.txt"
+          code=0; "$APP" --selftest || code=$?
+          cat "$AUTOCORRECT_SELFTEST_OUT" 2>/dev/null || echo "(no selftest output)"
+          exit $code
+
+      - name: Windows installer (Inno Setup)
+        if: runner.os == 'Windows'
+        run: |
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          if [ ! -f "$ISCC" ]; then choco install innosetup -y --no-progress; fi
+          export APP_VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF" == refs/tags/v* ]] || export APP_VERSION="1.0.0"
+          "$ISCC" packaging/windows-installer.iss
+
+      - name: macOS disk image
+        if: runner.os == 'macOS'
+        run: packaging/build-dmg.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.file }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.file }}

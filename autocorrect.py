@@ -1,5 +1,5 @@
 """
-Autocorrect - select text anywhere, press a hotkey, get it translated / fixed in place.
+Autocorrect engine - select text anywhere, press a hotkey, get it translated / fixed in place.
 
 Default hotkeys (editable in config.json):
     Ctrl+Alt+E  ->  translate selection to English
@@ -11,10 +11,10 @@ How it works: the app copies the current selection, sends it to the AI
 then pastes the result back over the selection. Your original clipboard
 content is restored afterwards.
 
-On Ubuntu/Linux (especially Wayland) run install-ubuntu.sh instead: it registers
-system keyboard shortcuts that call this script in one-shot mode, e.g.
-    python autocorrect.py --once translate English
-    python autocorrect.py --once fix
+Ways to run:
+    desktop_app.py              tray icon + settings window (what the installers ship)
+    autocorrect.py              console version of the same hotkey listener
+    autocorrect.py --once fix   one action on the current selection (used by install-ubuntu.sh)
 """
 
 import argparse
@@ -26,21 +26,33 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 import pyperclip
 
-APP_DIR = Path(__file__).resolve().parent
+APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 sys.path.insert(0, str(APP_DIR))
 from autocorrect_core import Action, ProviderError, build_chain  # noqa: E402
 
-CONFIG_PATH = APP_DIR / "config.json"
 IS_MAC = platform.system() == "Darwin"
+IS_WINDOWS = platform.system() == "Windows"
 IS_LINUX = platform.system() == "Linux"
+FROZEN = getattr(sys, "frozen", False)  # running from an installer build
 
-# "providers" is tried in order; switch method by editing this list.
+
+def user_config_dir() -> Path:
+    if IS_WINDOWS:
+        return Path(os.environ.get("APPDATA", Path.home())) / "Autocorrect"
+    if IS_MAC:
+        return Path.home() / "Library" / "Application Support" / "Autocorrect"
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "autocorrect"
+
+
+# Installed app: settings live in the user's folder. Running from source: next to the script.
+CONFIG_PATH = Path(os.environ.get("AUTOCORRECT_CONFIG") or
+                   (user_config_dir() / "config.json" if FROZEN else APP_DIR / "config.json"))
+
+# "providers" is tried in order; switch method by editing this list (or in the settings window).
 # Types: server, anthropic, openrouter, openai_compatible (see autocorrect_core/providers.py).
 DEFAULT_CONFIG = {
     "providers": [
@@ -62,6 +74,20 @@ EXAMPLES = {
 }
 
 
+def build_defaults() -> dict:
+    """DEFAULT_CONFIG plus anything baked into the installer (defaults.json: server url, ...)."""
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    baked = APP_DIR / "defaults.json"
+    if baked.exists():
+        try:
+            extra = json.loads(baked.read_text(encoding="utf-8"))
+            if extra.get("server_url"):
+                cfg["providers"][0]["url"] = extra["server_url"]
+        except (ValueError, OSError):
+            pass
+    return cfg
+
+
 def migrate_old_config(cfg: dict) -> dict:
     """Configs from the first version had server_url/access_code/api_key at the top level."""
     if "providers" in cfg:
@@ -74,18 +100,24 @@ def migrate_old_config(cfg: dict) -> dict:
                           "model": cfg.get("model", "claude-opus-5-5"), "effort": cfg.get("effort", "low")})
     for key in ("server_url", "access_code", "api_key", "model", "effort"):
         cfg.pop(key, None)
-    cfg["providers"] = providers or DEFAULT_CONFIG["providers"]
+    cfg["providers"] = providers or build_defaults()["providers"]
     return cfg
+
+
+def save_config(cfg: dict):
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(CONFIG_PATH)
 
 
 def load_config() -> dict:
     if not CONFIG_PATH.exists():
-        cfg = dict(DEFAULT_CONFIG, provider_examples=EXAMPLES)
-        CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+        save_config(dict(build_defaults(), provider_examples=EXAMPLES))
     raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     cfg = migrate_old_config(dict(raw))
     if cfg != raw:
-        CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+        save_config(cfg)
     for key, value in DEFAULT_CONFIG.items():
         cfg.setdefault(key, value)
     return cfg
@@ -100,19 +132,23 @@ def is_configured(provider: dict) -> bool:
 
 
 CONFIG = load_config()
-busy = threading.Lock()
-keyboard = None  # pynput, imported only in hotkey-listener mode
-kb = None
-MOD = None
+_config_mtime = CONFIG_PATH.stat().st_mtime
 _chain = None
+busy = threading.Lock()
+
+# Optional hook so the tray app can show notifications its own way.
+notify_hook = None
 
 
-def init_pynput():
-    global keyboard, kb, MOD
-    from pynput import keyboard as _keyboard
-    keyboard = _keyboard
-    kb = keyboard.Controller()
-    MOD = keyboard.Key.cmd if IS_MAC else keyboard.Key.ctrl
+def reload_config_if_changed():
+    """Pick up changes saved by the settings window without restarting."""
+    global CONFIG, _config_mtime, _chain
+    try:
+        mtime = CONFIG_PATH.stat().st_mtime
+    except OSError:
+        return
+    if mtime != _config_mtime:
+        CONFIG, _config_mtime, _chain = load_config(), mtime, None
 
 
 def has_credentials() -> bool:
@@ -131,29 +167,165 @@ def transform(text: str, action: Action) -> str:
         return chain().transform(text, action, log=lambda m: print(f"    ({m})"))
     except ProviderError as e:
         msg = str(e)
-        if e.status == 401 and not msg.endswith("."):
-            msg = "Invalid API key - check config.json."
+        if e.status in (401, 403) and not msg.endswith("."):
+            msg = "Invalid API key - check the settings."
+        elif e.status == 402:
+            msg = "The AI account is out of credit."
         elif msg == "unreachable":
             msg = "No connection - check your internet."
         raise RuntimeError(msg) from e
 
 
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+
+def run(cmd: list, input_text: str | None = None) -> str | None:
+    try:
+        out = subprocess.run(cmd, input=input_text, capture_output=True, text=True, timeout=5)
+        return out.stdout if out.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def notify(message: str):
+    print(message)
+    if notify_hook:
+        try:
+            notify_hook(message)
+            return
+        except Exception:
+            pass
+    if IS_MAC:
+        safe = message.replace("\\", "\\\\").replace('"', '\\"')
+        run(["osascript", "-e", f'display notification "{safe}" with title "Autocorrect"'])
+    elif shutil.which("notify-send"):
+        run(["notify-send", "-a", "Autocorrect", "-t", "3000", "Autocorrect", message])
+
+
+# ---------------------------------------------------------------------------
+# Keyboard (pynput). Keys are matched by their physical position, so the hotkeys
+# and the simulated Ctrl+C / Ctrl+V also work with a Hebrew (or any) keyboard layout.
+# ---------------------------------------------------------------------------
+
+keyboard = None  # pynput.keyboard, imported only in hotkey mode
+kb = None
+MOD = None
+
+# macOS virtual key codes for letters/digits (layout independent).
+_MAC_VK = {0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g", 6: "z", 7: "x", 8: "c", 9: "v", 11: "b",
+           12: "q", 13: "w", 14: "e", 15: "r", 16: "y", 17: "t", 18: "1", 19: "2", 20: "3", 21: "4",
+           22: "6", 23: "5", 25: "9", 26: "7", 28: "8", 29: "0", 31: "o", 32: "u", 34: "i", 35: "p",
+           37: "l", 38: "j", 40: "k", 45: "n", 46: "m"}
+_MAC_VK_BY_CHAR = {c: vk for vk, c in _MAC_VK.items()}
+
+
+def init_pynput():
+    global keyboard, kb, MOD
+    from pynput import keyboard as _keyboard
+    keyboard = _keyboard
+    kb = keyboard.Controller()
+    MOD = keyboard.Key.cmd if IS_MAC else keyboard.Key.ctrl
+
+
+def physical_letter(key) -> str | None:
+    """The letter/digit printed on the key, regardless of the active keyboard layout."""
+    vk = getattr(key, "vk", None)
+    char = getattr(key, "char", None)
+    if IS_WINDOWS and vk is not None and (0x30 <= vk <= 0x39 or 0x41 <= vk <= 0x5A):
+        return chr(vk).lower()
+    if IS_MAC and vk in _MAC_VK:
+        return _MAC_VK[vk]
+    if char and len(char) == 1 and char.isascii() and char.isalnum():
+        return char.lower()
+    if vk is not None and (0x61 <= vk <= 0x7A or 0x30 <= vk <= 0x39):  # X11 keysyms
+        return chr(vk)
+    return None
+
+
+def key_for(letter: str):
+    """A pynput key that presses the physical key for `letter` (for simulating Ctrl+C / Ctrl+V)."""
+    if IS_WINDOWS:
+        return keyboard.KeyCode.from_vk(ord(letter.upper()))
+    if IS_MAC:
+        return keyboard.KeyCode.from_vk(_MAC_VK_BY_CHAR[letter])
+    return keyboard.KeyCode.from_char(letter)
+
+
+def parse_combo(combo: str) -> tuple[frozenset, str]:
+    mods, letter = set(), None
+    for part in combo.lower().split("+"):
+        part = part.strip()
+        if part in ("<ctrl>", "<control>"):
+            mods.add("ctrl")
+        elif part in ("<alt>", "<option>"):
+            mods.add("alt")
+        elif part == "<shift>":
+            mods.add("shift")
+        elif part in ("<cmd>", "<super>", "<win>"):
+            mods.add("cmd")
+        else:
+            letter = part.strip("<>")
+    if not letter:
+        raise ValueError(f"bad hotkey {combo!r}")
+    return frozenset(mods), letter
+
+
+class HotkeyListener:
+    """Global hotkeys matched by physical key (unlike pynput.GlobalHotKeys, which uses the typed character)."""
+
+    def __init__(self, bindings: dict):
+        self.bindings = {parse_combo(c): fn for c, fn in bindings.items()}
+        self.mods: set[str] = set()
+        K = keyboard.Key
+        self.mod_names = {}
+        for name, keys in {"ctrl": ("ctrl", "ctrl_l", "ctrl_r"), "alt": ("alt", "alt_l", "alt_r", "alt_gr"),
+                           "shift": ("shift", "shift_l", "shift_r"), "cmd": ("cmd", "cmd_l", "cmd_r")}.items():
+            for k in keys:
+                if hasattr(K, k):
+                    self.mod_names[getattr(K, k)] = name
+        self.listener = keyboard.Listener(on_press=self._press, on_release=self._release)
+
+    def _press(self, key):
+        if key in self.mod_names:
+            self.mods.add(self.mod_names[key])
+            return
+        letter = physical_letter(key)
+        fn = self.bindings.get((frozenset(self.mods), letter)) if letter else None
+        if fn:
+            fn()
+
+    def _release(self, key):
+        self.mods.discard(self.mod_names.get(key))
+
+    def start(self):
+        self.listener.start()
+
+    def join(self):
+        self.listener.join()
+
+    def stop(self):
+        self.listener.stop()
+
+
 def release_modifiers():
     # The user is still holding Ctrl/Alt from the hotkey; release them so our
     # simulated Ctrl+C / Ctrl+V isn't read as Ctrl+Alt+C.
-    for key in (keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r,
-                keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r,
-                keyboard.Key.shift, keyboard.Key.cmd):
+    for name in ("alt", "alt_l", "alt_r", "alt_gr", "ctrl", "ctrl_l", "ctrl_r", "shift", "cmd"):
+        key = getattr(keyboard.Key, name, None)
+        if key is None:
+            continue
         try:
             kb.release(key)
         except Exception:
             pass
 
 
-def press_combo(char: str):
+def press_combo(letter: str):
+    key = key_for(letter)
     with kb.pressed(MOD):
-        kb.press(char)
-        kb.release(char)
+        kb.press(key)
+        kb.release(key)
 
 
 def copy_selection() -> str:
@@ -169,9 +341,15 @@ def copy_selection() -> str:
 
 
 def handle(action: Action):
+    """Run one action on the current selection (hotkey mode)."""
     if not busy.acquire(blocking=False):
         return
     try:
+        reload_config_if_changed()
+        if not has_credentials():
+            notify("Autocorrect isn't set up yet - open Settings.")
+            return
+
         time.sleep(0.15)
         release_modifiers()
         time.sleep(0.05)
@@ -183,15 +361,15 @@ def handle(action: Action):
 
         text = copy_selection()
         if not text.strip():
-            print("[!] No text selected.")
+            notify("No text selected.")
             pyperclip.copy(original_clipboard)
             return
 
         print(f"[...] {action.describe()}: {len(text)} chars")
         try:
             result = transform(text, action)
-        except Exception as e:  # noqa: BLE001 - show any other failure to the user
-            print(f"[x] {e}")
+        except Exception as e:  # noqa: BLE001 - show any failure to the user
+            notify(str(e))
             pyperclip.copy(original_clipboard)
             return
 
@@ -206,26 +384,36 @@ def handle(action: Action):
         busy.release()
 
 
+def start_hotkeys() -> HotkeyListener:
+    """Start listening for the configured hotkeys in the background."""
+    init_pynput()
+    bindings = {}
+    for combo, spec in CONFIG["hotkeys"].items():
+        action = Action.from_dict(spec)
+        bindings[combo] = (lambda a=action: threading.Thread(target=handle, args=(a,), daemon=True).start())
+    listener = HotkeyListener(bindings)
+    listener.start()
+    return listener
+
+
+def describe_hotkeys() -> list[tuple[str, str]]:
+    out = []
+    for combo, spec in CONFIG["hotkeys"].items():
+        mods, letter = parse_combo(combo)
+        names = {"ctrl": "Ctrl", "alt": "Option" if IS_MAC else "Alt", "shift": "Shift",
+                 "cmd": "Cmd" if IS_MAC else "Win"}
+        order = ["ctrl", "alt", "shift", "cmd"]
+        label = "+".join([names[m] for m in order if m in mods] + [letter.upper()])
+        out.append((label, Action.from_dict(spec).describe()))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Linux one-shot mode (works on Wayland and X11, triggered by a system shortcut)
 # ---------------------------------------------------------------------------
 
 def is_wayland() -> bool:
     return os.environ.get("XDG_SESSION_TYPE") == "wayland" or bool(os.environ.get("WAYLAND_DISPLAY"))
-
-
-def run(cmd: list, input_text: str | None = None) -> str | None:
-    try:
-        out = subprocess.run(cmd, input=input_text, capture_output=True, text=True, timeout=5)
-        return out.stdout if out.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
-def notify(message: str):
-    print(message)
-    if shutil.which("notify-send"):
-        run(["notify-send", "-a", "Autocorrect", "-t", "3000", "Autocorrect", message])
 
 
 def linux_read_selection() -> str:
@@ -303,7 +491,7 @@ def run_once(action: Action):
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Entry point (console version)
 # ---------------------------------------------------------------------------
 
 def parse_once(args: list) -> Action:
@@ -318,7 +506,7 @@ def parse_once(args: list) -> Action:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Translate / fix selected text with Claude.")
+    parser = argparse.ArgumentParser(description="Translate / fix selected text with AI.")
     parser.add_argument("--once", nargs="+", metavar="ACTION",
                         help="run one action on the current selection and exit "
                              "(e.g. --once translate English, --once fix)")
@@ -338,17 +526,11 @@ def main():
               f"(see \"provider_examples\" there: server + access code, or your own key).")
         sys.exit(1)
 
-    init_pynput()
-    bindings = {}
     print(f"Autocorrect is running ({chain().describe()}). Select text and press:")
-    for combo, spec in CONFIG["hotkeys"].items():
-        action = Action.from_dict(spec)
-        print(f"  {combo:<20} {action.describe()}")
-        bindings[combo] = (lambda a=action: threading.Thread(target=handle, args=(a,), daemon=True).start())
+    for label, desc in describe_hotkeys():
+        print(f"  {label:<20} {desc}")
     print("Press Ctrl+C in this window to quit.\n")
-
-    with keyboard.GlobalHotKeys(bindings) as listener:
-        listener.join()
+    start_hotkeys().join()
 
 
 if __name__ == "__main__":

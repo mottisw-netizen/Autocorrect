@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autocorrect – הגדרות</title>
+<style>
+  :root {
+    --bg: #f4f4f8; --card: #ffffff; --text: #1f2330; --muted: #6b7080; --line: #e3e4ec;
+    --accent: #4f46e5; --accent-dark: #3730a3; --ok: #15803d; --err: #b42318; --field: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14151b; --card: #1d1f27; --text: #eceef5; --muted: #9aa0b2; --line: #2e313d;
+      --accent: #7c74ff; --accent-dark: #5b52f0; --ok: #4ade80; --err: #f87171; --field: #262934;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+    display: flex; justify-content: center; padding: 32px 16px;
+  }
+  main { width: 100%; max-width: 520px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px; }
+  h1 { margin: 0 0 4px; font-size: 26px; display: flex; align-items: center; gap: 12px; }
+  .logo { width: 40px; height: 40px; border-radius: 10px; background: var(--accent); color: #fff;
+          display: grid; place-items: center; font-weight: 800; font-size: 22px; }
+  .lead { color: var(--muted); margin: 0 0 20px; }
+  .keys { list-style: none; padding: 0; margin: 0 0 24px; display: grid; gap: 8px; }
+  .keys li { display: flex; justify-content: space-between; align-items: center;
+             padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; }
+  kbd { direction: ltr; font: 600 14px ui-monospace, Menlo, Consolas, monospace;
+        background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+  h2 { font-size: 17px; margin: 0 0 10px; }
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+  .modes label { border: 2px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; }
+  .modes label:has(input:checked) { border-color: var(--accent); }
+  .modes input { accent-color: var(--accent); margin-inline-end: 6px; }
+  .modes small { display: block; color: var(--muted); margin-top: 2px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 6px; }
+  input[type=text], input[type=password], select {
+    width: 100%; padding: 11px 12px; font-size: 16px; color: var(--text); background: var(--field);
+    border: 1px solid var(--line); border-radius: 10px;
+  }
+  input[type=text]:focus, input[type=password]:focus, select:focus {
+    outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent;
+  }
+  .ltr { direction: ltr; text-align: left; }
+  .hint { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .hint a { color: var(--accent); }
+  button {
+    width: 100%; margin-top: 8px; padding: 13px; font-size: 17px; font-weight: 700; color: #fff;
+    background: var(--accent); border: 0; border-radius: 12px; cursor: pointer;
+  }
+  button:hover { background: var(--accent-dark); }
+  button:disabled { opacity: .6; cursor: wait; }
+  #status { margin-top: 14px; min-height: 24px; font-weight: 600; }
+  #status.ok { color: var(--ok); }
+  #status.err { color: var(--err); }
+  [hidden] { display: none !important; }
+  @media (max-width: 480px) { .modes { grid-template-columns: 1fr; } .card { padding: 20px; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1><span class="logo">A</span> Autocorrect</h1>
+    <p class="lead">מסמנים טקסט בכל תוכנה ולוחצים על אחד הקיצורים:</p>
+    <ul class="keys" id="keys"></ul>
+
+    <h2>איך להתחבר?</h2>
+    <div class="modes">
+      <label><input type="radio" name="mode" value="server" checked>קוד גישה<small>קיבלתם קוד מהשירות (מומלץ)</small></label>
+      <label><input type="radio" name="mode" value="own_key">מפתח AI משלי<small>OpenRouter, Claude, OpenAI…</small></label>
+    </div>
+
+    <section id="server-section">
+      <div class="field">
+        <label for="code">קוד גישה</label>
+        <input type="text" id="code" class="ltr" placeholder="XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field" id="url-field">
+        <label for="url">כתובת שרת</label>
+        <input type="text" id="url" class="ltr" placeholder="https://…" autocomplete="off" spellcheck="false">
+      </div>
+    </section>
+
+    <section id="key-section" hidden>
+      <div class="field">
+        <label for="service">שירות</label>
+        <select id="service">
+          <option value="openrouter">OpenRouter</option>
+          <option value="anthropic">Claude (Anthropic)</option>
+          <option value="openai">OpenAI</option>
+          <option value="custom">אחר (תואם OpenAI)</option>
+        </select>
+      </div>
+      <div class="field" id="base-url-field" hidden>
+        <label for="base_url">כתובת API</label>
+        <input type="text" id="base_url" class="ltr" placeholder="https://…/v1" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="api_key">מפתח API</label>
+        <input type="password" id="api_key" class="ltr" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="model">מודל</label>
+        <input type="text" id="model" class="ltr" autocomplete="off" spellcheck="false">
+        <div class="hint" id="model-hint"></div>
+      </div>
+    </section>
+
+    <button id="save">שמירה ובדיקה</button>
+    <div id="status" role="status"></div>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const MODEL_HINTS = {
+    openrouter: 'מזהה מודל מהרשימה ב-<a href="https://openrouter.ai/models" target="_blank">openrouter.ai/models</a>',
+    anthropic: 'ברירת מחדל: claude-opus-5-5',
+    openai: 'שם מודל של OpenAI',
+    custom: 'שם המודל אצל השירות',
+  };
+  const KEY_PLACEHOLDERS = { openrouter: 'sk-or-…', anthropic: 'sk-ant-…', openai: 'sk-…', custom: '' };
+
+  function mode() { return document.querySelector('input[name=mode]:checked').value; }
+
+  function update() {
+    const own = mode() === 'own_key';
+    $('server-section').hidden = own;
+    $('key-section').hidden = !own;
+    const svc = $('service').value;
+    $('base-url-field').hidden = svc !== 'custom';
+    $('model-hint').innerHTML = MODEL_HINTS[svc];
+    $('api_key').placeholder = KEY_PLACEHOLDERS[svc];
+    if (svc === 'anthropic' && !$('model').value) $('model').value = 'claude-opus-5-5';
+  }
+
+  function setStatus(text, kind) {
+    $('status').textContent = text;
+    $('status').className = kind || '';
+  }
+
+  async function load() {
+    const s = await (await fetch('api/state')).json();
+    $('keys').innerHTML = '';
+    for (const k of s.hotkeys) {
+      const li = document.createElement('li');
+      const span = document.createElement('span');
+      span.textContent = k.action;
+      const kbd = document.createElement('kbd');
+      kbd.textContent = k.keys;
+      li.append(span, kbd);
+      $('keys').append(li);
+    }
+    const f = s.fields;
+    document.querySelector(`input[name=mode][value=${f.mode}]`).checked = true;
+    for (const id of ['code', 'url', 'api_key', 'model', 'base_url']) $(id).value = f[id] || '';
+    $('service').value = f.service;
+    $('url-field').hidden = s.server_preset;
+    update();
+    if (!s.configured) setStatus('כדי להתחיל, הזינו קוד גישה או מפתח ולחצו „שמירה ובדיקה“.');
+  }
+
+  async function save() {
+    $('save').disabled = true;
+    setStatus('בודק…');
+    const body = {
+      mode: mode(), code: $('code').value, url: $('url').value, service: $('service').value,
+      api_key: $('api_key').value, model: $('model').value, base_url: $('base_url').value,
+    };
+    try {
+      const r = await (await fetch('api/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })).json();
+      setStatus(r.message, r.ok ? 'ok' : 'err');
+    } catch (e) {
+      setStatus('האפליקציה לא פועלת. הפעילו את Autocorrect ונסו שוב.', 'err');
+    }
+    $('save').disabled = false;
+  }
+
+  document.querySelectorAll('input[name=mode]').forEach((el) => el.addEventListener('change', update));
+  $('service').addEventListener('change', update);
+  $('save').addEventListener('click', save);
+  load();
+</script>
+</body>
+</html>

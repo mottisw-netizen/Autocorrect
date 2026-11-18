@@ -29,34 +29,139 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="28dp"
-            android:text="@string/code_label"
+            android:text="@string/mode_label"
             android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/code"
+        <RadioGroup
+            android:id="@+id/mode"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/code_hint"
-            android:importantForAutofill="no"
-            android:inputType="textCapCharacters|textNoSuggestions"
-            android:textDirection="ltr"
-            android:textSize="20sp" />
+            android:layout_height="wrap_content">
 
-        <TextView
-            android:id="@+id/server_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/server_label"
-            android:textStyle="bold" />
+            <RadioButton
+                android:id="@+id/mode_server"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/mode_server"
+                android:textSize="16sp" />
 
-        <EditText
-            android:id="@+id/server"
+            <RadioButton
+                android:id="@+id/mode_own_key"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/mode_own_key"
+                android:textSize="16sp" />
+        </RadioGroup>
+
+        <!-- Mode 1: access code to your server -->
+        <LinearLayout
+            android:id="@+id/section_server"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:importantForAutofill="no"
-            android:inputType="textUri"
-            android:textDirection="ltr" />
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/code_label"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/code"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/code_hint"
+                android:importantForAutofill="no"
+                android:inputType="textCapCharacters|textNoSuggestions"
+                android:textDirection="ltr"
+                android:textSize="20sp" />
+
+            <TextView
+                android:id="@+id/server_label"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/server_label"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/server"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:importantForAutofill="no"
+                android:inputType="textUri"
+                android:textDirection="ltr" />
+        </LinearLayout>
+
+        <!-- Mode 2: the user's own AI key -->
+        <LinearLayout
+            android:id="@+id/section_own_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/service_label"
+                android:textStyle="bold" />
+
+            <Spinner
+                android:id="@+id/preset"
+                android:layout_width="match_parent"
+                android:layout_height="48dp" />
+
+            <TextView
+                android:id="@+id/base_url_label"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/base_url_label"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/base_url"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="https://…/v1"
+                android:importantForAutofill="no"
+                android:inputType="textUri"
+                android:textDirection="ltr" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/api_key_label"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/api_key"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:importantForAutofill="no"
+                android:inputType="textPassword|textNoSuggestions"
+                android:textDirection="ltr" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/model_label"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/model"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/model_hint"
+                android:importantForAutofill="no"
+                android:inputType="textNoSuggestions"
+                android:textDirection="ltr" />
+        </LinearLayout>
 
         <Button
             android:id="@+id/save"

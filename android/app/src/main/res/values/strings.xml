@@ -11,7 +11,7 @@
     <string name="close">סגירה</string>
     <string name="copied">הועתק! אפשר להדביק</string>
     <string name="open_settings">להגדרות</string>
-    <string name="no_code">צריך קודם להזין קוד גישה באפליקציה.</string>
+    <string name="no_code">צריך קודם להגדיר את האפליקציה (קוד גישה או מפתח).</string>
     <string name="no_text">לא נבחר טקסט.</string>
     <string name="readonly_hint">אי אפשר להחליף כאן את הטקסט, אז הנה התוצאה:</string>
 
@@ -26,6 +26,17 @@
     <string name="try_title">נסו כאן</string>
     <string name="try_hint">כתבו משהו, סמנו אותו ובחרו „תרגום ותיקון“</string>
 
+    <string name="mode_label">איך להתחבר?</string>
+    <string name="mode_server">קוד גישה (מומלץ)</string>
+    <string name="mode_own_key">מפתח AI משלי</string>
+    <string name="service_label">שירות</string>
+    <string name="base_url_label">כתובת API</string>
+    <string name="api_key_label">מפתח API</string>
+    <string name="model_label">מודל</string>
+    <string name="model_hint">למשל מזהה מודל מ-openrouter.ai/models</string>
+    <string name="connected_key">עובד ✓  (%1$s)</string>
+    <string name="err_key">מפתח ה-API לא תקין.</string>
+    <string name="err_credit">נגמרה היתרה בחשבון ה-AI.</string>
     <string name="err_code">קוד הגישה לא תקין. בדקו אותו בהגדרות.</string>
     <string name="err_limit">הגעתם למכסה היומית. נסו שוב מחר.</string>
     <string name="err_too_long">הטקסט ארוך מדי.</string>

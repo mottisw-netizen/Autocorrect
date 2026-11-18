@@ -3,7 +3,10 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val serverUrl = (project.findProperty("autocorrectServerUrl") as String?) ?: ""
+fun prop(name: String) = (project.findProperty(name) as String?) ?: ""
+val serverUrl = prop("autocorrectServerUrl")
+val defaultMode = prop("autocorrectDefaultMode").ifEmpty { "server" }
+val defaultModel = prop("autocorrectDefaultModel")
 
 android {
     namespace = "com.autocorrect.app"
@@ -16,6 +19,8 @@ android {
         versionCode = 1
         versionName = "1.0"
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"$serverUrl\"")
+        buildConfigField("String", "DEFAULT_MODE", "\"$defaultMode\"")
+        buildConfigField("String", "DEFAULT_MODEL", "\"$defaultModel\"")
     }
 
     buildFeatures {

@@ -20,13 +20,27 @@
 
 **אפליקציית Android:** מסמנים טקסט בכל אפליקציה ובוחרים „תרגום ותיקון“ בתפריט שנפתח. קובץ ההתקנה (APK) נבנה אוטומטית ב-GitHub, בלשונית Actions, בהרצה של "Android APK", תחת Artifacts. כדי שהלקוחות יזינו רק קוד ולא כתובת שרת, מגדירים ב-GitHub משתנה בשם `AUTOCORRECT_SERVER_URL` (ב-Settings, תחת Secrets and variables, ב-Actions, בלשונית Variables).
 
-**אפליקציית המחשב** עובדת בשתי דרכים. בדרך הראשונה, ללקוחות, ממלאים ב-`config.json` את `server_url` ואת `access_code`. בדרך השנייה, לשימוש עצמי, ממלאים מפתח Claude משלכם ב-`api_key`.
+### מעבר בין שיטות
+
+כל החלקים עובדים עם אותם ספקים, ומחליפים ביניהם בהגדרה, בלי לשנות קוד:
+
+| שיטה | שרת | מחשב (`config.json` ← `providers`) | Android (מסך ההגדרות) |
+|---|---|---|---|
+| השרת שלכם עם קוד גישה | | `server` | „קוד גישה“ |
+| Claude ישירות | `anthropic` | `anthropic` | דרך OpenRouter |
+| OpenRouter | `openrouter` | `openrouter` | „מפתח משלי“, ואז OpenRouter |
+| OpenAI או שירות תואם אחר | `openai_compatible` | `openai_compatible` | „מפתח משלי“, ואז OpenAI או „אחר“ |
+
+- **בשרת ובמחשב** אפשר לרשום כמה ספקים ברשימה. אם הראשון נכשל, עוברים אוטומטית לבא בתור.
+- **בשרת** מחליפים ספק בפקודה אחת, בלי הפעלה מחדש. ראו [server/README.md](server/README.md).
+- **ב-`config.json` של אפליקציית המחשב** יש דוגמאות מוכנות לכל ספק, תחת `provider_examples`.
+- **מצב ברירת המחדל באפליקציית Android** נקבע ב-`android/gradle.properties`, בהגדרה `autocorrectDefaultMode`, וגם המשתמש יכול לשנות אותו במסך ההגדרות.
 
 ## התקנה (פעם אחת)
 
 1. **התקינו Python** מהאתר https://www.python.org/downloads (ב-Windows סמנו את האפשרות "Add Python to PATH").
 2. **הריצו את התוכנה פעם אחת.** ייווצר קובץ `config.json` בתיקייה.
-3. **פתחו את `config.json`** ומלאו בו כתובת שרת וקוד גישה (`server_url` ו-`access_code`), או מפתח Claude משלכם (`api_key`, מ-https://platform.claude.com).
+3. **פתחו את `config.json`** ומלאו ב-`providers` כתובת שרת וקוד גישה, או מפתח AI משלכם. דוגמאות לכל ספק נמצאות ב-`provider_examples`.
 
 ## הפעלה
 

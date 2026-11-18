@@ -31,21 +31,21 @@ class ProcessTextActivity : Activity() {
 
         when {
             text.isBlank() -> showMessage(getString(R.string.no_text))
-            Settings.accessCode(this).isBlank() -> showMessage(getString(R.string.no_code), openSettings = true)
+            !Settings.isConfigured(this) -> showMessage(getString(R.string.no_code), openSettings = true)
             else -> {
-                findViewById<Button>(R.id.btn_english).setOnClickListener { run("translate", "English") }
-                findViewById<Button>(R.id.btn_hebrew).setOnClickListener { run("translate", "Hebrew") }
-                findViewById<Button>(R.id.btn_fix).setOnClickListener { run("fix", null) }
+                findViewById<Button>(R.id.btn_english).setOnClickListener { run(Action.translate("English")) }
+                findViewById<Button>(R.id.btn_hebrew).setOnClickListener { run(Action.translate("Hebrew")) }
+                findViewById<Button>(R.id.btn_fix).setOnClickListener { run(Action.fix()) }
             }
         }
     }
 
-    private fun run(action: String, target: String?) {
+    private fun run(action: Action) {
         findViewById<View>(R.id.actions).visibility = View.GONE
         findViewById<View>(R.id.progress).visibility = View.VISIBLE
         thread {
             val outcome = try {
-                Result.success(Api.transform(this, text, action, target))
+                Result.success(Settings.provider(this).transform(text, action))
             } catch (e: ApiException) {
                 Result.failure(e)
             }

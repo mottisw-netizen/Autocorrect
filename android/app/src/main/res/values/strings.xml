@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Autocorrect</string>
+    <string name="process_label">תרגום ותיקון</string>
+
+    <string name="to_english">🇺🇸  תרגום לאנגלית</string>
+    <string name="to_hebrew">🇮🇱  תרגום לעברית</string>
+    <string name="fix">✍️  תיקון שגיאות</string>
+    <string name="working">רגע, עובד על זה…</string>
+    <string name="copy">העתקה</string>
+    <string name="close">סגירה</string>
+    <string name="copied">הועתק! אפשר להדביק</string>
+    <string name="open_settings">להגדרות</string>
+    <string name="no_code">צריך קודם להזין קוד גישה באפליקציה.</string>
+    <string name="no_text">לא נבחר טקסט.</string>
+    <string name="readonly_hint">אי אפשר להחליף כאן את הטקסט, אז הנה התוצאה:</string>
+
+    <string name="main_title">ברוכים הבאים ל-Autocorrect</string>
+    <string name="main_intro">מסמנים טקסט בכל אפליקציה (וואטסאפ, פייסבוק, ג׳ימייל…), ובתפריט שנפתח בוחרים „תרגום ותיקון“. אם לא רואים את האפשרות, לוחצים על ⋮ בתפריט.</string>
+    <string name="code_label">קוד גישה</string>
+    <string name="code_hint">XXXX-XXXX-XXXX</string>
+    <string name="server_label">כתובת שרת</string>
+    <string name="save">שמירה ובדיקה</string>
+    <string name="checking">בודק…</string>
+    <string name="connected">מחובר ✓  שלום %1$s</string>
+    <string name="try_title">נסו כאן</string>
+    <string name="try_hint">כתבו משהו, סמנו אותו ובחרו „תרגום ותיקון“</string>
+
+    <string name="err_code">קוד הגישה לא תקין. בדקו אותו בהגדרות.</string>
+    <string name="err_limit">הגעתם למכסה היומית. נסו שוב מחר.</string>
+    <string name="err_too_long">הטקסט ארוך מדי.</string>
+    <string name="err_busy">השרת עמוס כרגע, נסו שוב בעוד רגע.</string>
+    <string name="err_network">אין חיבור לשרת. בדקו את האינטרנט.</string>
+    <string name="err_generic">משהו השתבש (%1$s). נסו שוב.</string>
+</resources>

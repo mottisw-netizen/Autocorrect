@@ -25,6 +25,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import anthropic
@@ -36,6 +38,10 @@ IS_MAC = platform.system() == "Darwin"
 IS_LINUX = platform.system() == "Linux"
 
 DEFAULT_CONFIG = {
+    # Option 1 (customers): your Autocorrect server + an access code. No AI key needed.
+    "server_url": "",
+    "access_code": "",
+    # Option 2 (direct): your own Claude API key.
     "api_key": "",
     "model": "claude-opus-5-5",
     "effort": "low",
@@ -97,7 +103,45 @@ def init_pynput():
     MOD = keyboard.Key.cmd if IS_MAC else keyboard.Key.ctrl
 
 
+def uses_server() -> bool:
+    return bool(CONFIG.get("server_url") and CONFIG.get("access_code"))
+
+
+def has_credentials() -> bool:
+    return uses_server() or bool(CONFIG["api_key"] or os.environ.get("ANTHROPIC_API_KEY"))
+
+
+SERVER_ERRORS = {
+    401: "Invalid access code - check config.json.",
+    429: "Daily limit reached - try again tomorrow.",
+    413: "The text is too long.",
+    503: "The server is busy - try again in a moment.",
+}
+
+
+def transform_via_server(text: str, action: dict) -> str:
+    body = {"text": text, "action": action["action"]}
+    if action["action"] == "translate":
+        body["target"] = action["target"]
+    req = urllib.request.Request(
+        CONFIG["server_url"].rstrip("/") + "/v1/transform",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {CONFIG['access_code'].strip()}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read().decode("utf-8"))["result"]
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(SERVER_ERRORS.get(e.code, f"Server error {e.code}.")) from e
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise RuntimeError("No connection to the server.") from e
+
+
 def transform(text: str, action: dict) -> str:
+    if uses_server():
+        return transform_via_server(text, action)
     response = client.beta.messages.create(
         model=CONFIG["model"],
         max_tokens=16000,
@@ -271,8 +315,8 @@ def linux_paste() -> bool:
 
 
 def run_once(action: dict):
-    if not (CONFIG["api_key"] or os.environ.get("ANTHROPIC_API_KEY")):
-        notify(f"No API key - add it to {CONFIG_PATH}")
+    if not has_credentials():
+        notify(f"No access code or API key - add it to {CONFIG_PATH}")
         sys.exit(1)
 
     text = linux_read_selection() if IS_LINUX else pyperclip.paste()
@@ -329,8 +373,9 @@ def main():
               "Run ./install-ubuntu.sh to register system shortcuts instead.")
         sys.exit(1)
 
-    if not (CONFIG["api_key"] or os.environ.get("ANTHROPIC_API_KEY")):
-        print(f"No API key found. Add it to {CONFIG_PATH} (\"api_key\") or set ANTHROPIC_API_KEY.")
+    if not has_credentials():
+        print(f"Not configured. In {CONFIG_PATH} set \"server_url\" + \"access_code\", "
+              f"or your own \"api_key\".")
         sys.exit(1)
 
     init_pynput()

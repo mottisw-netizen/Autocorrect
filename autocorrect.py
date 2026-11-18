@@ -9,11 +9,19 @@ Default hotkeys (editable in config.json):
 How it works: the app copies the current selection, sends it to Claude,
 then pastes the result back over the selection. Your original clipboard
 content is restored afterwards.
+
+On Ubuntu/Linux (especially Wayland) run install-ubuntu.sh instead: it registers
+system keyboard shortcuts that call this script in one-shot mode, e.g.
+    python autocorrect.py --once translate English
+    python autocorrect.py --once fix
 """
 
+import argparse
 import json
 import os
 import platform
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -21,11 +29,11 @@ from pathlib import Path
 
 import anthropic
 import pyperclip
-from pynput import keyboard
 
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = APP_DIR / "config.json"
 IS_MAC = platform.system() == "Darwin"
+IS_LINUX = platform.system() == "Linux"
 
 DEFAULT_CONFIG = {
     "api_key": "",
@@ -75,9 +83,18 @@ def load_config() -> dict:
 
 CONFIG = load_config()
 client = anthropic.Anthropic(api_key=CONFIG["api_key"] or None)  # falls back to ANTHROPIC_API_KEY
-kb = keyboard.Controller()
 busy = threading.Lock()
-MOD = keyboard.Key.cmd if IS_MAC else keyboard.Key.ctrl
+keyboard = None  # pynput, imported only in hotkey-listener mode
+kb = None
+MOD = None
+
+
+def init_pynput():
+    global keyboard, kb, MOD
+    from pynput import keyboard as _keyboard
+    keyboard = _keyboard
+    kb = keyboard.Controller()
+    MOD = keyboard.Key.cmd if IS_MAC else keyboard.Key.ctrl
 
 
 def transform(text: str, action: dict) -> str:
@@ -182,11 +199,141 @@ def handle(action: dict):
         busy.release()
 
 
+# ---------------------------------------------------------------------------
+# Linux one-shot mode (works on Wayland and X11, triggered by a system shortcut)
+# ---------------------------------------------------------------------------
+
+def is_wayland() -> bool:
+    return os.environ.get("XDG_SESSION_TYPE") == "wayland" or bool(os.environ.get("WAYLAND_DISPLAY"))
+
+
+def run(cmd: list, input_text: str | None = None) -> str | None:
+    try:
+        out = subprocess.run(cmd, input=input_text, capture_output=True, text=True, timeout=5)
+        return out.stdout if out.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def notify(message: str):
+    print(message)
+    if shutil.which("notify-send"):
+        run(["notify-send", "-a", "Autocorrect", "-t", "3000", "Autocorrect", message])
+
+
+def linux_read_selection() -> str:
+    # On Linux, highlighted text is available as the PRIMARY selection, no Ctrl+C needed.
+    candidates = []
+    if is_wayland() and shutil.which("wl-paste"):
+        candidates.append(["wl-paste", "--primary", "--no-newline"])
+    if shutil.which("xclip"):
+        candidates.append(["xclip", "-o", "-selection", "primary"])
+    if shutil.which("xsel"):
+        candidates.append(["xsel", "--primary", "--output"])
+    for cmd in candidates:
+        text = run(cmd)
+        if text and text.strip():
+            return text
+    return ""
+
+
+def linux_write_clipboard(text: str) -> bool:
+    if is_wayland() and shutil.which("wl-copy"):
+        # wl-copy forks and keeps serving the clipboard after we exit.
+        try:
+            subprocess.run(["wl-copy"], input=text, text=True, timeout=5)
+            return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if shutil.which("xclip"):
+        try:
+            p = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE, text=True)
+            p.communicate(text, timeout=5)
+            return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    try:
+        pyperclip.copy(text)
+        return True
+    except Exception:
+        return False
+
+
+def linux_paste() -> bool:
+    time.sleep(0.15)
+    if not is_wayland() and shutil.which("xdotool"):
+        return run(["xdotool", "key", "--clearmodifiers", "ctrl+v"]) is not None
+    if shutil.which("ydotool"):
+        # Release Ctrl/Alt/Shift that may still be held from the shortcut, then Ctrl+V.
+        # Key codes: 29=LeftCtrl 56=LeftAlt 42=LeftShift 47=V
+        return run(["ydotool", "key", "56:0", "42:0", "29:1", "47:1", "47:0", "29:0"]) is not None
+    return False
+
+
+def run_once(action: dict):
+    if not (CONFIG["api_key"] or os.environ.get("ANTHROPIC_API_KEY")):
+        notify(f"No API key - add it to {CONFIG_PATH}")
+        sys.exit(1)
+
+    text = linux_read_selection() if IS_LINUX else pyperclip.paste()
+    if not text.strip():
+        notify("No text selected.")
+        return
+
+    try:
+        result = transform(text, action)
+    except anthropic.AuthenticationError:
+        notify("Invalid API key - check config.json")
+        return
+    except anthropic.APIConnectionError:
+        notify("No connection to the Claude API.")
+        return
+    except Exception as e:  # noqa: BLE001
+        notify(f"Error: {e}")
+        return
+
+    if not linux_write_clipboard(result):
+        notify("Could not write to the clipboard (install wl-clipboard or xclip).")
+        return
+    if linux_paste():
+        print("[ok] Done.")
+    else:
+        notify("Ready - press Ctrl+V to paste.")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def parse_once(args: list) -> dict:
+    if args[0] == "fix":
+        return {"action": "fix"}
+    if args[0] == "translate" and len(args) > 1:
+        return {"action": "translate", "target": " ".join(args[1:])}
+    sys.exit("Usage: --once fix | --once translate <Language>")
+
+
 def main():
+    parser = argparse.ArgumentParser(description="Translate / fix selected text with Claude.")
+    parser.add_argument("--once", nargs="+", metavar="ACTION",
+                        help="run one action on the current selection and exit "
+                             "(e.g. --once translate English, --once fix)")
+    args = parser.parse_args()
+
+    if args.once:
+        run_once(parse_once(args.once))
+        return
+
+    if IS_LINUX and is_wayland():
+        print("Wayland detected: global hotkeys can't be captured here.\n"
+              "Run ./install-ubuntu.sh to register system shortcuts instead.")
+        sys.exit(1)
+
     if not (CONFIG["api_key"] or os.environ.get("ANTHROPIC_API_KEY")):
         print(f"No API key found. Add it to {CONFIG_PATH} (\"api_key\") or set ANTHROPIC_API_KEY.")
         sys.exit(1)
 
+    init_pynput()
     bindings = {}
     print("Autocorrect is running. Select text and press:")
     for combo, action in CONFIG["hotkeys"].items():

@@ -62,8 +62,10 @@ jobs:
           export AUTOCORRECT_CONFIG="$RUNNER_TEMP/selftest-config.json"
           export AUTOCORRECT_SELFTEST_OUT="$RUNNER_TEMP/selftest.txt"
           code=0; "$APP" --selftest || code=$?
+          echo "exit code: $code"
           cat "$AUTOCORRECT_SELFTEST_OUT" 2>/dev/null || echo "(no selftest output)"
-          exit $code
+          # Fail unless the app itself reported success (a GUI app might return before running).
+          [ "$code" = 0 ] && [ "$(cat "$AUTOCORRECT_SELFTEST_OUT" 2>/dev/null)" = "ok" ]
 
       - name: Windows installer (Inno Setup)
         if: runner.os == 'Windows'

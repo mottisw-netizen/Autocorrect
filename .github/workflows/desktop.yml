@@ -10,6 +10,7 @@ on:
       - "autocorrect_core/**"
       - "packaging/**"
       - ".github/workflows/desktop.yml"
+    branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
 
